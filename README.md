@@ -91,6 +91,66 @@ nohup uvicorn app.main:app --host 0.0.0.0 --port 16009 \
 curl -s http://127.0.0.1:16009/health
 ```
 
+### Nginx / 反代注意事项（静态资源加载失败）
+
+页面里的 CSS/JS 使用**站点根路径**：`/static/style.css`、`/static/app.js`，API 也是 `/api/...`、`/health`。
+
+如果只把某个子路径反代到 16009（例如 `https://host/beta/voxclone/` → `127.0.0.1:16009`），浏览器仍会去请求 **`https://host/static/...`**（丢掉前缀），导致样式和脚本 404、页面“空白/半残”。
+
+建议任选其一：
+
+**1）推荐：整站根路径反代（或独立域名/端口）**
+
+```nginx
+# 例如 https://tts.example.com/ 或 https://host:16009/
+location / {
+    proxy_pass http://127.0.0.1:16009;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # TTS 合成可能较久
+    proxy_read_timeout 300s;
+}
+```
+
+**2）必须挂在子路径时：把前缀剥掉，并保证 `/static`、`/api`、`/` 都进同一 upstream**
+
+```nginx
+# 访问 https://host/beta/voxclone/  →  后端看到 /
+location /beta/voxclone/ {
+    proxy_pass http://127.0.0.1:16009/;   # 注意末尾斜杠：剥掉 /beta/voxclone
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+}
+```
+
+但即便剥掉前缀，HTML 里写的仍是 `/static/...`（相对**域名根**），浏览器不会自动加 `/beta/voxclone`。子路径部署下仍会缺静态资源，除非：
+
+- 改成独立域名/根路径反代（方案 1），或
+- 额外为静态资源单独反代，例如：
+
+```nginx
+location /static/ {
+    proxy_pass http://127.0.0.1:16009/static/;
+}
+location /api/ {
+    proxy_pass http://127.0.0.1:16009/api/;
+    proxy_read_timeout 300s;
+}
+location = /health {
+    proxy_pass http://127.0.0.1:16009/health;
+}
+location = / {
+    proxy_pass http://127.0.0.1:16009/;
+}
+```
+
+自查：打开浏览器开发者工具 → Network，确认 `/static/style.css`、`/static/app.js` 是否 200；若是 404，就是反代路径没配对。
+
 ## 本机快速启动（开发）
 
 ```bash
