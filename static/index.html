@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VoxClone · 语音复刻</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <h1>VoxClone</h1>
+        <p class="sub">音色复刻 · 文本朗读 · VoxCPM2</p>
+        <p id="status" class="status">检查服务中…</p>
+      </header>
+
+      <section class="card">
+        <h2>朗读</h2>
+        <p class="hint">选择已有音色，输入文本后生成并播放。</p>
+        <label class="field">
+          <span>音色 speaker</span>
+          <select id="speakerSelect"></select>
+        </label>
+        <label class="field">
+          <span>要朗读的文本</span>
+          <textarea id="ttsText" rows="4" placeholder="输入要合成的文字…"></textarea>
+        </label>
+        <div class="row">
+          <button id="btnSpeak" type="button" class="primary">生成并播放</button>
+          <a id="downloadLink" class="ghost" href="#" download="tts.wav" hidden>下载 wav</a>
+        </div>
+        <audio id="player" controls class="player"></audio>
+        <p id="ttsMsg" class="msg"></p>
+      </section>
+
+      <section class="card">
+        <h2>复刻新音色</h2>
+        <p class="hint" id="cloneHints">加载推荐文案…</p>
+        <div class="script-box">
+          <div class="script-label">请口齿清晰地朗读：</div>
+          <p id="cloneScript" class="script"></p>
+          <button id="btnCopyScript" type="button" class="ghost small">复制文案</button>
+        </div>
+        <label class="field">
+          <span>音色名（字母数字下划线）</span>
+          <input id="newName" type="text" placeholder="例如 xiaoming" maxlength="40" />
+        </label>
+        <label class="field">
+          <span>上传音频（mp3 / m4a / wav）</span>
+          <input id="audioFile" type="file" accept=".mp3,.m4a,.wav,audio/*" />
+        </label>
+        <label class="field">
+          <span>转录文本（默认用推荐文案；须与音频内容一致）</span>
+          <textarea id="transcript" rows="3"></textarea>
+        </label>
+        <button id="btnClone" type="button" class="primary">上传并复刻</button>
+        <p id="cloneMsg" class="msg"></p>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
