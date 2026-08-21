@@ -148,6 +148,29 @@ a.ghost {
   margin-top: 0.25rem;
 }
 
+.timing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  margin: 0.65rem 0 0;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.timing[hidden] {
+  display: none;
+}
+
+.timing .k {
+  color: var(--muted);
+}
+
+.timing .v {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .msg {
   min-height: 1.2em;
   margin: 0.75rem 0 0;

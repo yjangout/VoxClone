@@ -7,12 +7,13 @@ import logging
 import os
 import re
 import wave
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
 
 from .audio_utils import float_to_int16_bytes, tame_head_harshness
-from .text_utils import DEFAULT_MAX_CHARS, split_text_for_tts
+from .text_utils import DEFAULT_MAX_CHARS, split_text_for_stream, split_text_for_tts
 
 logger = logging.getLogger(__name__)
 
@@ -104,20 +105,25 @@ class TTSEngine:
             ):
                 pass
 
-    def synthesize_wav(self, text: str, speaker: str) -> bytes:
-        self.load()
-        assert self._model is not None
+    def _voice(self, speaker: str) -> dict[str, str]:
         voices = self.resolve_voices()
         if speaker not in voices:
             raise KeyError(
                 f"unknown speaker {speaker!r}; available: {sorted(voices.keys())}"
             )
-        voice = voices[speaker]
+        return voices[speaker]
 
-        chunks: list[np.ndarray] = []
+    def iter_audio_chunks(
+        self, text: str, speaker: str, *, by_sentence: bool = False
+    ) -> Iterator[np.ndarray]:
+        self.load()
+        assert self._model is not None
+        voice = self._voice(speaker)
+        splitter = split_text_for_stream if by_sentence else split_text_for_tts
         first = True
         silence = np.zeros(int(0.25 * SAMPLE_RATE), dtype=np.float32)
-        for piece in split_text_for_tts(text, max_chars=self.max_chars):
+        yielded = False
+        for piece in splitter(text, max_chars=self.max_chars):
             for audio_chunk in self._model.generate_streaming(
                 text=piece,
                 prompt_wav_path=voice["ref_wav"],
@@ -131,12 +137,21 @@ class TTSEngine:
                     first = False
                     chunk = tame_head_harshness(chunk, SAMPLE_RATE)
                     chunk = np.concatenate([silence, chunk])
-                chunks.append(chunk)
-        if not chunks:
-            chunks.append(silence)
+                yielded = True
+                yield chunk
+        if not yielded:
+            yield silence
         else:
-            chunks.append(silence)
+            yield silence
 
+    def iter_pcm_bytes(self, text: str, speaker: str) -> Iterator[bytes]:
+        for chunk in self.iter_audio_chunks(text, speaker, by_sentence=True):
+            pcm = float_to_int16_bytes(chunk)
+            if pcm:
+                yield pcm
+
+    def synthesize_wav(self, text: str, speaker: str) -> bytes:
+        chunks = list(self.iter_audio_chunks(text, speaker, by_sentence=False))
         audio = np.concatenate(chunks)
         pcm = float_to_int16_bytes(audio)
         return _pcm16_to_wav_bytes(pcm, SAMPLE_RATE)

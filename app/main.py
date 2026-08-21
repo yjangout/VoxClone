@@ -6,19 +6,21 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.concurrency import iterate_in_threadpool
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .audio_convert import ConvertError, convert_to_ref_wav
 from .prompts import CLONE_HINTS, CLONE_SCRIPT
-from .tts_engine import SPEAKER_DIR_RE, TTSEngine
+from .tts_engine import SAMPLE_RATE, SPEAKER_DIR_RE, TTSEngine
 
 load_dotenv(".env.local")
 load_dotenv(".env")
@@ -183,8 +185,7 @@ def create_app() -> FastAPI:
         shutil.rmtree(d)
         return {"ok": True, "speaker": speaker}
 
-    @api.post("/api/tts")
-    def tts(req: TTSRequest) -> Response:
+    def _prepare_tts(req: TTSRequest) -> tuple[str, str]:
         text = req.text.strip()
         if not text:
             raise HTTPException(status_code=400, detail="text 不能为空")
@@ -194,6 +195,17 @@ def create_app() -> FastAPI:
                 engine.load()
             except Exception as e:
                 raise HTTPException(status_code=503, detail=f"模型未就绪: {e}") from e
+        voices = engine.resolve_voices()
+        if speaker not in voices:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown speaker {speaker!r}; available: {sorted(voices.keys())}",
+            )
+        return text, speaker
+
+    @api.post("/api/tts")
+    def tts(req: TTSRequest) -> Response:
+        text, speaker = _prepare_tts(req)
         try:
             wav = engine.synthesize_wav(text, speaker)
         except KeyError as e:
@@ -205,6 +217,39 @@ def create_app() -> FastAPI:
             content=wav,
             media_type="audio/wav",
             headers={"Content-Disposition": 'inline; filename="tts.wav"'},
+        )
+
+    @api.post("/api/tts/stream")
+    def tts_stream(req: TTSRequest) -> StreamingResponse:
+        text, speaker = _prepare_tts(req)
+
+        def _gen():
+            first = True
+            t0 = time.perf_counter()
+            try:
+                for pcm in engine.iter_pcm_bytes(text, speaker):
+                    if first:
+                        first = False
+                        logger.info(
+                            "tts stream first chunk speaker=%s ms=%.0f",
+                            speaker,
+                            (time.perf_counter() - t0) * 1000,
+                        )
+                    yield pcm
+            except Exception:
+                logger.exception("tts stream failed speaker=%s", speaker)
+
+        return StreamingResponse(
+            iterate_in_threadpool(_gen()),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": 'inline; filename="tts.pcm"',
+                "Cache-Control": "no-cache, no-store",
+                "X-Accel-Buffering": "no",
+                "X-Sample-Rate": str(SAMPLE_RATE),
+                "X-Channels": "1",
+                "X-Sample-Width": "2",
+            },
         )
 
     if STATIC_DIR.is_dir():

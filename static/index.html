@@ -19,7 +19,7 @@
 
       <section class="card">
         <h2>朗读</h2>
-        <p class="hint">选择已有音色，输入文本后生成并播放。</p>
+        <p class="hint">选择已有音色，输入文本后流式合成：首句出声后继续生成。</p>
         <label class="field">
           <span>音色 speaker</span>
           <select id="speakerSelect"></select>
@@ -33,6 +33,7 @@
           <a id="downloadLink" class="ghost" href="#" download="tts.wav" hidden>下载 wav</a>
         </div>
         <audio id="player" controls class="player"></audio>
+        <p id="ttsTiming" class="timing" hidden></p>
         <p id="ttsMsg" class="msg"></p>
       </section>
 

@@ -110,6 +110,8 @@ location /xx/voxclone/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 300s;
+    proxy_buffering off;
+    gzip off;
     client_max_body_size 20m;
 }
 ```
@@ -141,7 +143,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 16009
 | GET | `/api/clone-script` | 推荐朗读文案 |
 | POST | `/api/speakers` | multipart：`name` + `audio` + 可选 `transcript` |
 | DELETE | `/api/speakers/{name}` | 删除音色 |
-| POST | `/api/tts` | 指定音色朗读文本，返回 `audio/wav` |
+| POST | `/api/tts` | 指定音色朗读文本，返回完整 `audio/wav` |
+| POST | `/api/tts/stream` | 同上，按句流式返回 raw PCM（48kHz / 16bit / 单声道） |
 
 ### 指定音色朗读：`POST /api/tts`
 
@@ -174,6 +177,29 @@ curl -s -X POST https://host/xx/voxclone/api/tts \
   -H 'Content-Type: application/json' \
   -d '{"speaker":"xiaoming","text":"今天想聊点什么？"}' \
   --output /tmp/out.wav
+```
+
+### 流式朗读：`POST /api/tts/stream`
+
+网页用这个接口边收边播，并统计**首包时间**（点生成 → 收到第一段 PCM）。body 与 `/api/tts` 相同。
+
+响应：`application/octet-stream`，raw PCM（s16le / 48kHz / mono）。响应头：
+
+- `X-Sample-Rate: 48000`
+- `X-Channels: 1`
+- `X-Sample-Width: 2`
+- `X-Accel-Buffering: no`（避免 nginx 把流攒完再吐）
+
+反代务必 `proxy_buffering off;`，否则首包会被 nginx 缓冲，页面上看起来仍像整段生成。
+
+```bash
+# -N 关闭 curl 缓冲，便于观察首包
+curl -N -X POST http://127.0.0.1:16009/api/tts/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"speaker":"xiaoming","text":"今天想聊点什么？天气不错。"}' \
+  --output /tmp/out.pcm
+
+ffmpeg -y -f s16le -ar 48000 -ac 1 -i /tmp/out.pcm /tmp/out.wav
 ```
 
 ## 目录
