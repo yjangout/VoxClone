@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VoxClone · 语音复刻</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="__BASE_PATH__/static/style.css" />
+    <script>
+      window.VOXCLONE_BASE = "__BASE_PATH__";
+    </script>
   </head>
   <body>
     <main class="wrap">
@@ -57,6 +60,6 @@
         <p id="cloneMsg" class="msg"></p>
       </section>
     </main>
-    <script src="/static/app.js"></script>
+    <script src="__BASE_PATH__/static/app.js"></script>
   </body>
 </html>

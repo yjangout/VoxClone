@@ -1,3 +1,6 @@
+const BASE = (window.VOXCLONE_BASE || "").replace(/\/$/, "");
+const url = (path) => BASE + (path.startsWith("/") ? path : "/" + path);
+
 const $ = (id) => document.getElementById(id);
 
 const statusEl = $("status");
@@ -21,8 +24,16 @@ function setMsg(el, text, kind = "") {
   el.className = "msg" + (kind ? ` ${kind}` : "");
 }
 
+function errDetail(err) {
+  if (typeof err?.detail === "string") return err.detail;
+  if (Array.isArray(err?.detail)) {
+    return err.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+  }
+  return null;
+}
+
 async function refreshSpeakers(prefer) {
-  const res = await fetch("/api/speakers");
+  const res = await fetch(url("/api/speakers"));
   const data = await res.json();
   const list = data.speakers || [];
   speakerSelect.innerHTML = "";
@@ -47,11 +58,12 @@ async function refreshSpeakers(prefer) {
 async function boot() {
   try {
     const [health, script] = await Promise.all([
-      fetch("/health").then((r) => r.json()),
-      fetch("/api/clone-script").then((r) => r.json()),
+      fetch(url("/health")).then((r) => r.json()),
+      fetch(url("/api/clone-script")).then((r) => r.json()),
     ]);
     const speakers = (health.speakers || []).join(", ") || "无";
-    statusEl.textContent = `模型: ${health.status} · device=${health.device} · speakers=[${speakers}]`;
+    const baseHint = health.base_path ? ` · base=${health.base_path}` : "";
+    statusEl.textContent = `模型: ${health.status} · device=${health.device}${baseHint} · speakers=[${speakers}]`;
     cloneScript.textContent = script.script || "";
     cloneHints.textContent = script.hints || "";
     transcript.value = script.script || "";
@@ -85,14 +97,14 @@ btnSpeak.addEventListener("click", async () => {
   btnSpeak.disabled = true;
   setMsg(ttsMsg, "合成中，请稍候…");
   try {
-    const res = await fetch("/api/tts", {
+    const res = await fetch(url("/api/tts"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, speaker }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+      throw new Error(errDetail(err) || `HTTP ${res.status}`);
     }
     const blob = await res.blob();
     if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
@@ -127,9 +139,9 @@ btnClone.addEventListener("click", async () => {
   btnClone.disabled = true;
   setMsg(cloneMsg, "上传并转码中…");
   try {
-    const res = await fetch("/api/speakers", { method: "POST", body: fd });
+    const res = await fetch(url("/api/speakers"), { method: "POST", body: fd });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(errDetail(data) || `HTTP ${res.status}`);
     let msg = `已保存音色「${data.speaker}」（${data.duration_sec}s）`;
     if (data.warning) msg += " · " + data.warning;
     setMsg(cloneMsg, msg, "ok");

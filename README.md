@@ -89,37 +89,24 @@ nohup uvicorn app.main:app --host 0.0.0.0 --port 16009 \
 
 ```bash
 curl -s http://127.0.0.1:16009/health
+# 若配置了 BASE_PATH=/beta/voxclone：
+curl -s http://127.0.0.1:16009/beta/voxclone/health
 ```
 
-### Nginx / 反代注意事项（静态资源加载失败）
+### 反代子路径：用 `BASE_PATH`（代码已适配）
 
-页面里的 CSS/JS 使用**站点根路径**：`/static/style.css`、`/static/app.js`，API 也是 `/api/...`、`/health`。
+页面/API/静态资源会自动带前缀，无需再拆多条 nginx location。
 
-如果只把某个子路径反代到 16009（例如 `https://host/beta/voxclone/` → `127.0.0.1:16009`），浏览器仍会去请求 **`https://host/static/...`**（丢掉前缀），导致样式和脚本 404、页面“空白/半残”。
-
-建议任选其一：
-
-**1）推荐：整站根路径反代（或独立域名/端口）**
-
-```nginx
-# 例如 https://tts.example.com/ 或 https://host:16009/
-location / {
-    proxy_pass http://127.0.0.1:16009;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    # TTS 合成可能较久
-    proxy_read_timeout 300s;
-}
+```bash
+# .env
+BASE_PATH=/beta/voxclone
 ```
 
-**2）必须挂在子路径时：把前缀剥掉，并保证 `/static`、`/api`、`/` 都进同一 upstream**
+nginx **保留完整路径**（`proxy_pass` 不要加会剥前缀的尾斜杠）：
 
 ```nginx
-# 访问 https://host/beta/voxclone/  →  后端看到 /
 location /beta/voxclone/ {
-    proxy_pass http://127.0.0.1:16009/;   # 注意末尾斜杠：剥掉 /beta/voxclone
+    proxy_pass http://127.0.0.1:16009;   # 无尾斜杠：URI 原样转发
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -128,28 +115,9 @@ location /beta/voxclone/ {
 }
 ```
 
-但即便剥掉前缀，HTML 里写的仍是 `/static/...`（相对**域名根**），浏览器不会自动加 `/beta/voxclone`。子路径部署下仍会缺静态资源，除非：
+然后打开 `https://host/beta/voxclone/`。`/health` 里会返回 `"base_path": "/beta/voxclone"`。
 
-- 改成独立域名/根路径反代（方案 1），或
-- 额外为静态资源单独反代，例如：
-
-```nginx
-location /static/ {
-    proxy_pass http://127.0.0.1:16009/static/;
-}
-location /api/ {
-    proxy_pass http://127.0.0.1:16009/api/;
-    proxy_read_timeout 300s;
-}
-location = /health {
-    proxy_pass http://127.0.0.1:16009/health;
-}
-location = / {
-    proxy_pass http://127.0.0.1:16009/;
-}
-```
-
-自查：打开浏览器开发者工具 → Network，确认 `/static/style.css`、`/static/app.js` 是否 200；若是 404，就是反代路径没配对。
+本地直连 `http://IP:16009` 时把 `BASE_PATH` 留空即可。
 
 ## 本机快速启动（开发）
 
