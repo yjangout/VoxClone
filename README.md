@@ -97,23 +97,24 @@ curl -s http://127.0.0.1:16009/health
 
 ```bash
 # .env（与对外路径一致）
-BASE_PATH=/beta/vllm1
+BASE_PATH=/xx/voxclone
 ```
 
 常见写法（剥前缀，推荐）：
 
 ```nginx
-location /beta/vllm1/ {
-    proxy_pass http://127.0.0.1:16009/;   # 有尾斜杠：/beta/vllm1/xxx → /xxx
+location /xx/voxclone/ {
+    proxy_pass http://127.0.0.1:16009/;   # 有尾斜杠：/xx/voxclone/xxx → /xxx
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 300s;
+    client_max_body_size 20m;
 }
 ```
 
-然后打开 `https://host/beta/vllm1/`。改完 `.env` 后必须重启 uvicorn。
+然后打开 `https://host/xx/voxclone/`。改完 `.env` 后必须重启 uvicorn。
 
 本地直连 `http://IP:16009` 时把 `BASE_PATH` 留空。
 
@@ -140,16 +141,38 @@ uvicorn app.main:app --host 0.0.0.0 --port 16009
 | GET | `/api/clone-script` | 推荐朗读文案 |
 | POST | `/api/speakers` | multipart：`name` + `audio` + 可选 `transcript` |
 | DELETE | `/api/speakers/{name}` | 删除音色 |
-| POST | `/api/tts` | JSON `{ "text", "speaker" }` → `audio/wav` |
+| POST | `/api/tts` | 指定音色朗读文本，返回 `audio/wav` |
 
-示例：
+### 指定音色朗读：`POST /api/tts`
+
+JSON body：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `speaker` | string | 已复刻的音色名（字母、数字、`_`、`-`） |
+| `text` | string | 要朗读的文本，不能为空 |
+
+成功：`200`，body 为 48kHz wav。失败常见：`400` 音色不存在 / 名称非法，`422` 缺字段，`503` 模型未就绪。
+
+先查已有音色，再合成：
 
 ```bash
-curl -s http://127.0.0.1:16009/health
+# 列出音色
+curl -s http://127.0.0.1:16009/api/speakers
 
+# 用指定 speaker 朗读，保存 wav
 curl -s -X POST http://127.0.0.1:16009/api/tts \
   -H 'Content-Type: application/json' \
-  -d '{"text":"今天想聊点什么？","speaker":"xiaoming"}' \
+  -d '{"speaker":"xiaoming","text":"今天想聊点什么？"}' \
+  --output /tmp/out.wav
+```
+
+走 nginx 反代时，把路径加上 `BASE_PATH`（示例 `/xx/voxclone`）：
+
+```bash
+curl -s -X POST https://host/xx/voxclone/api/tts \
+  -H 'Content-Type: application/json' \
+  -d '{"speaker":"xiaoming","text":"今天想聊点什么？"}' \
   --output /tmp/out.wav
 ```
 

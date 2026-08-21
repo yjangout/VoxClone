@@ -9,12 +9,12 @@ import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .audio_convert import ConvertError, convert_to_ref_wav
 from .prompts import CLONE_HINTS, CLONE_SCRIPT
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 VOICES_DIR = os.environ.get("VOICES_DIR", str(ROOT / "voices"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "20"))
 STATIC_DIR = ROOT / "static"
-# 反代子路径，例如 /beta/voxclone；本地直连留空
+# 反代子路径，例如 /xx/voxclone；本地直连留空
 BASE_PATH = os.environ.get("BASE_PATH", "").strip().rstrip("/")
 
 
@@ -44,23 +44,40 @@ engine = TTSEngine(
 )
 
 
-class StripBasePathMiddleware(BaseHTTPMiddleware):
-    """nginx 若原样转发 /beta/vllm1/...，剥掉前缀后再走本应用路由。"""
+class TTSRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    speaker: str
 
-    async def dispatch(self, request: Request, call_next):
-        if BASE_PATH:
-            path = request.scope.get("path") or ""
+
+class StripBasePathMiddleware:
+    """nginx 若原样转发 /xx/voxclone/...，剥掉前缀后再走本应用路由。
+
+    必须用纯 ASGI 中间件：BaseHTTPMiddleware 会弄丢 POST body，导致 /api/tts 422。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and BASE_PATH:
+            path = scope.get("path") or ""
             if path == BASE_PATH or path.startswith(BASE_PATH + "/"):
+                scope = dict(scope)
                 stripped = path[len(BASE_PATH) :] or "/"
-                request.scope["path"] = stripped
-                request.scope["raw_path"] = stripped.encode("utf-8")
-        return await call_next(request)
+                scope["path"] = stripped
+                scope["raw_path"] = stripped.encode("utf-8")
+        await self.app(scope, receive, send)
 
 
 def create_app() -> FastAPI:
     api = FastAPI(title="VoxClone", version="0.1.0")
     if BASE_PATH:
         api.add_middleware(StripBasePathMiddleware)
+
+    @api.exception_handler(RequestValidationError)
+    async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        logger.warning("422 %s %s detail=%s", request.method, request.url.path, exc.errors())
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     @api.on_event("startup")
     def _startup() -> None:
@@ -165,10 +182,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"speaker {speaker!r} not found")
         shutil.rmtree(d)
         return {"ok": True, "speaker": speaker}
-
-    class TTSRequest(BaseModel):
-        text: str = Field(..., min_length=1)
-        speaker: str
 
     @api.post("/api/tts")
     def tts(req: TTSRequest) -> Response:
