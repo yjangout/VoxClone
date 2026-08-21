@@ -14,33 +14,91 @@
 - VoxCPM2 模型权重（本地目录）
 
 ```bash
+# Debian/Ubuntu
+sudo apt update
+sudo apt install -y ffmpeg python3-venv python3-pip git
+
 # macOS
 brew install ffmpeg
-
-# Debian/Ubuntu
-sudo apt install -y ffmpeg
 ```
 
-## 安装与启动
+## Linux 部署与启动
+
+适合 H20 / 其它带 CUDA 的 Linux 服务器：
 
 ```bash
-cd ~/Desktop/self/VoxClone
+# 1) 拉代码
+git clone https://github.com/yjangout/VoxClone.git
+cd VoxClone
+
+# 2) 虚拟环境
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-# 先按你的 CUDA 版本安装 torch，再装本项目依赖，例如 CUDA 13：
-# pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision torchaudio
+
+# 3) 先装 CUDA 版 torch（按机器 CUDA 选 index；示例 CUDA 13）
+pip install --index-url https://download.pytorch.org/whl/cu130 \
+  torch torchvision torchaudio
+
+# 若是 CUDA 12.x，可改用：
+# pip install --index-url https://download.pytorch.org/whl/cu124 \
+#   torch torchvision torchaudio
+
+# 4) 再装项目依赖
 pip install -r requirements.txt
 
+# 5) 配置
 cp .env.example .env
-# 编辑 .env：把 TTS_MODEL 改成 VoxCPM2 模型目录
+# 编辑 .env，至少设置：
+#   TTS_MODEL=/你的路径/VoxCPM2
+#   TTS_DEVICE=cuda
 
-export TTS_MODEL=/path/to/VoxCPM2
-export TTS_DEVICE=cuda
+set -a; source .env; set +a
+
+# 6) 启动（默认端口 16009）
 uvicorn app.main:app --host 0.0.0.0 --port 16009
 ```
 
-浏览器打开 **http://localhost:16009**。
+浏览器访问：`http://<服务器IP>:16009`。
+
+### 后台常驻（可选）
+
+```bash
+# nohup
+nohup uvicorn app.main:app --host 0.0.0.0 --port 16009 \
+  > /tmp/voxclone.log 2>&1 &
+
+# 或 systemd 用户服务示例 /etc/systemd/system/voxclone.service：
+# [Unit]
+# Description=VoxClone TTS
+# After=network.target
+#
+# [Service]
+# WorkingDirectory=/path/to/VoxClone
+# EnvironmentFile=/path/to/VoxClone/.env
+# ExecStart=/path/to/VoxClone/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 16009
+# Restart=on-failure
+#
+# [Install]
+# WantedBy=multi-user.target
+#
+# sudo systemctl daemon-reload && sudo systemctl enable --now voxclone
+```
+
+健康检查：
+
+```bash
+curl -s http://127.0.0.1:16009/health
+```
+
+## 本机快速启动（开发）
+
+```bash
+cd VoxClone
+source .venv/bin/activate
+set -a; source .env; set +a
+uvicorn app.main:app --host 0.0.0.0 --port 16009
+```
 
 ## 使用流程
 
@@ -81,4 +139,3 @@ voices/        运行时音色库（上传后生成，默认不入库）
 
 - 复刻参考音频建议 **8–30 秒**、单人、无背景音乐；`ref.txt` 须与音频内容一致
 - 新增音色目录会被自动扫描，无需改代码
-- 本项目不依赖 LiveKit / VoxEMW 对话链路
