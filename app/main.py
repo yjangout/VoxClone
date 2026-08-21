@@ -10,9 +10,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from .audio_convert import ConvertError, convert_to_ref_wav
 from .prompts import CLONE_HINTS, CLONE_SCRIPT
@@ -42,8 +44,23 @@ engine = TTSEngine(
 )
 
 
+class StripBasePathMiddleware(BaseHTTPMiddleware):
+    """nginx 若原样转发 /beta/vllm1/...，剥掉前缀后再走本应用路由。"""
+
+    async def dispatch(self, request: Request, call_next):
+        if BASE_PATH:
+            path = request.scope.get("path") or ""
+            if path == BASE_PATH or path.startswith(BASE_PATH + "/"):
+                stripped = path[len(BASE_PATH) :] or "/"
+                request.scope["path"] = stripped
+                request.scope["raw_path"] = stripped.encode("utf-8")
+        return await call_next(request)
+
+
 def create_app() -> FastAPI:
     api = FastAPI(title="VoxClone", version="0.1.0")
+    if BASE_PATH:
+        api.add_middleware(StripBasePathMiddleware)
 
     @api.on_event("startup")
     def _startup() -> None:
@@ -187,25 +204,7 @@ def create_app() -> FastAPI:
 
         api.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    if not BASE_PATH:
-        return api
-
-    # 子路径挂载：浏览器请求 /beta/xxx/... ，应用内仍是 /api /static
-    root = FastAPI(title="VoxClone-Root")
-
-    @root.get("/")
-    def root_hint() -> dict:
-        return {
-            "message": f"VoxClone is mounted at {BASE_PATH}/",
-            "open": BASE_PATH + "/",
-        }
-
-    @root.get(BASE_PATH)
-    def redirect_no_slash() -> RedirectResponse:
-        return RedirectResponse(url=BASE_PATH + "/", status_code=307)
-
-    root.mount(BASE_PATH, api)
-    return root
+    return api
 
 
 app = create_app()

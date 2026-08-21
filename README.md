@@ -89,24 +89,22 @@ nohup uvicorn app.main:app --host 0.0.0.0 --port 16009 \
 
 ```bash
 curl -s http://127.0.0.1:16009/health
-# 若配置了 BASE_PATH=/beta/voxclone：
-curl -s http://127.0.0.1:16009/beta/voxclone/health
 ```
 
-### 反代子路径：用 `BASE_PATH`（代码已适配）
+### 反代子路径：用 `BASE_PATH`
 
-页面/API/静态资源会自动带前缀，无需再拆多条 nginx location。
+应用始终挂在 `/`。`BASE_PATH` 只改页面里 CSS/JS/API 的前缀，兼容 nginx **剥前缀**（常见）和 **原样转发**。
 
 ```bash
-# .env
-BASE_PATH=/beta/voxclone
+# .env（与对外路径一致）
+BASE_PATH=/beta/vllm1
 ```
 
-nginx **保留完整路径**（`proxy_pass` 不要加会剥前缀的尾斜杠）：
+常见写法（剥前缀，推荐）：
 
 ```nginx
-location /beta/voxclone/ {
-    proxy_pass http://127.0.0.1:16009;   # 无尾斜杠：URI 原样转发
+location /beta/vllm1/ {
+    proxy_pass http://127.0.0.1:16009/;   # 有尾斜杠：/beta/vllm1/xxx → /xxx
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -115,9 +113,9 @@ location /beta/voxclone/ {
 }
 ```
 
-然后打开 `https://host/beta/voxclone/`。`/health` 里会返回 `"base_path": "/beta/voxclone"`。
+然后打开 `https://host/beta/vllm1/`。改完 `.env` 后必须重启 uvicorn。
 
-本地直连 `http://IP:16009` 时把 `BASE_PATH` 留空即可。
+本地直连 `http://IP:16009` 时把 `BASE_PATH` 留空。
 
 ## 本机快速启动（开发）
 
